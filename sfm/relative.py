@@ -26,7 +26,12 @@ def fundamental_matrix(x_1: np.ndarray, x_2: np.ndarray) -> np.ndarray:
     p, _ = least_squares_svd(A)
 
     F = p.reshape((3,3))
-    # F = F / F[2,2]
+
+    U, s, Vh = svd(F)
+    S = np.zeros((3,3))
+    S[0,0] = s[0]
+    S[1,1] = s[1]
+    F = U @ S @ Vh
 
     return F
 
@@ -65,41 +70,6 @@ def essential_matrix(x_1: np.ndarray, x_2: np.ndarray, K: np.ndarray) -> np.ndar
 
     return E
 
-def essential_matrix_2(x_1: np.ndarray, x_2: np.ndarray, K: np.ndarray) -> tuple[np.ndarray, float]:
-    """computes essential-matrix from relative oriented image-points
-
-    Args:
-        x_1: [n x 3] points in image 1 as homogeneous coordinates (min 8 points)
-        x_2: [n x 3] corresponding points in image 2 as homogeneous coordinates
-        K: [3 x 3] kalibration matrix
-
-    Returns:
-        [3 x 3] essential-matrix
-    """
-    n = x_1.shape[0]
-    if n < 8 or x_2.shape[0] != n or x_1.shape[1] != 3 or x_2.shape[1] != 3:
-        raise ValueError("invalid input")
-
-    K_inv = inv(K)
-
-    A = np.zeros((n, 9))
-    for i in range(0,n):
-        x_1_k = K_inv @ x_1[i,:].reshape((3, 1))
-        x_2_k = K_inv @ x_2[i,:].reshape((3, 1))
-        A[i,:] = (x_1_k.reshape((3,1)) @ x_2_k.reshape((1,3))).reshape((9,))
-
-    p, s = least_squares_svd(A)
-
-    E = p.reshape((3,3))
-
-    # U, s, Vh = svd(E)
-    # S = np.zeros((3,3))
-    # S[0,0] = s[0]
-    # S[1,1] = s[1]
-    # E = U @ S @ Vh
-
-    return E, s
-
 def fundamental_from_essential(E: np.ndarray, K: np.ndarray) -> np.ndarray:
     """computes essential-matrix from relative oriented image-points
 
@@ -133,6 +103,35 @@ def comute_epipolar(x_1: np.ndarray, x_2: np.ndarray, F: np.ndarray) -> np.ndarr
     results = np.zeros((n,))
     for i in range(0,n):
         results[i] = x_1[i,:].reshape((1,3)) @ F @ x_2[i,:].reshape((3,1))
+
+    return results
+
+def comute_epipolar_distance(x_1: np.ndarray, x_2: np.ndarray, F: np.ndarray) -> np.ndarray:
+    """computes distances from epipolar-lines using fundamental-matrix
+
+    Args:
+        x_1: [n x 3] points in image 1 as homogeneous coordinates (min 8 points)
+        x_2: [n x 3] corresponding points in image 2 as homogeneous coordinates
+        F: [3 x 3] fundamental-matrix
+    
+    Returns:
+        [n x 1] result values (x_1*F*x_2)
+    """
+    n = x_1.shape[0]
+    if x_2.shape[0] != n or x_1.shape[1] != 3 or x_2.shape[1] != 3:
+        raise ValueError("invalid input")
+
+    results = np.zeros((n,))
+    for i in range(0,n):
+        line = F @ x_1[i,:]
+        a = line[0]
+        b = line[1]
+        c = line[2]
+        x = x_2[i,0] / x_2[i,2]
+        y = x_2[i,1] / x_2[i,2]
+        dx = -(b/a)*y - c/a - x
+        dy = -(a/b)*x - c/b - y
+        results[i] = dx*dy / np.sqrt(dx*dx + dy*dy)
 
     return results
 
@@ -201,7 +200,10 @@ def pick_valid_solution(x_1: np.ndarray, x_2: np.ndarray, K: np.ndarray, R1: np.
         r_2 = reproject(x_2, K, R)
 
         # compute intersection point in camera 1 coordinate system
-        P = compute_intersection(X0.T, r_1.T, T.T, r_2.T)
+        try:
+            P = compute_intersection(X0.T, r_1.T, T.T, r_2.T)
+        except:
+            continue
         if P[2] < 0:
             continue
 

@@ -13,6 +13,7 @@ from .dlt import dlt
 def compute_sfm(image_names: list[str], calib_names: list[str]) -> dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]:
     IMG_SIZE = (600, 800)
     CHECKERBOARD = (6,9)
+    KP_COUNT = 5000
     MATCH_COUNT = 100
 
     #****************************************
@@ -32,7 +33,7 @@ def compute_sfm(image_names: list[str], calib_names: list[str]) -> dict[str, tup
     for name in image_names:
         img = cv.imread(name, cv.IMREAD_GRAYSCALE)
         img = cv.resize(img, IMG_SIZE)
-        x, des = detect_sift_features(img)
+        x, des = detect_sift_features(img, KP_COUNT)
         global_ids = np.full((x.shape[0],), -1, dtype=np.int32)
         keypoints[name] = (x, des, global_ids)
 
@@ -55,7 +56,7 @@ def compute_sfm(image_names: list[str], calib_names: list[str]) -> dict[str, tup
                 continue
             x_1_match = x_1[mp[:,0]]
             x_2_match = x_2[mp[:,1]]
-            subset, ok = filter_correspondance_points_2(x_1_match, x_2_match, K, max_iter=10000, threshold=0.00001, consensus_count=30)
+            subset, ok = filter_correspondance_points_2(x_1_match, x_2_match, K, max_iter=10000, threshold=0.0001, consensus_count=30)
             if not ok:
                 continue
             mp_filtered = mp[subset]
@@ -88,7 +89,7 @@ def compute_sfm(image_names: list[str], calib_names: list[str]) -> dict[str, tup
                             is_equal[g2] = g1
                         elif g2 < g1:
                             is_equal[g1] = g2
-        processed.append(name)
+        processed.append(name_1)
     # remap ids using is_equal mappings
     gid_mapping = np.zeros((id_count,), dtype=np.int32)
     for i in range(gid_mapping.shape[0]):
@@ -112,46 +113,66 @@ def compute_sfm(image_names: list[str], calib_names: list[str]) -> dict[str, tup
     processed = []
 
     # select initial model
-    max_matches = 0
-    name_1 = ""
-    name_2 = ""
-    for name, mp in matches.items():
-        c = mp.shape[0]
-        if c > max_matches:
-            max_matches = c
-            name_1, name_2 = name.split(";")
-    # compute initial model
-    mp = matches[name_1 + ';' + name_2]
-    x_1, des_1, gid_1 = keypoints[name_1]
-    x_2, des_2, gid_2 = keypoints[name_2]
-    x_1_subset = x_1[mp[:,0]]
-    x_2_subset = x_2[mp[:,1]]
-    E = essential_matrix(x_1_subset, x_2_subset, K)
-    _R1, _R2, _T1, _T2 = solutions_from_essential(E)
-    R_2, T_2 = pick_valid_solution(x_1_subset[0,:], x_2_subset[0,:], K, _R1, _R2, _T1, _T2)
-    R_1 = build_rotation_matrix(0, 0, 0)
-    T_1 = np.array([0, 0, 0])
-    orientation[name_1] = (T_1, R_1)
-    orientation[name_2] = (T_2, R_2)
-    for i in range(mp.shape[0]):
-        i_1 = mp[i, 0]
-        i_2 = mp[i, 1]
-        X = triangulate_point(x_1[i_1,:], x_2[i_2,:], K, R_2, T_2, R_1, T_1)
-        if gid_1[i_1] != gid_2[i_2]:
-            raise ValueError("TODO: fix id mapping")
-        gid = gid_1[i_1]
-        points[gid, :3] = X
-        is_point[gid] = True
-    processed.append(name_1)
-    processed.append(name_2)
+    while True:
+        max_matches = 0
+        name_1 = ""
+        name_2 = ""
+        for name, mp in matches.items():
+            c = mp.shape[0]
+            if c > max_matches:
+                max_matches = c
+                name_1, name_2 = name.split(";")
+        # compute initial model
+        mp = matches[name_1 + ';' + name_2]
+        x_1, des_1, gid_1 = keypoints[name_1]
+        x_2, des_2, gid_2 = keypoints[name_2]
+        x_1_subset = x_1[mp[:,0]]
+        x_2_subset = x_2[mp[:,1]]
+        try:
+            E = essential_matrix(x_1_subset, x_2_subset, K)
+            _R1, _R2, _T1, _T2 = solutions_from_essential(E)
+            R_2, T_2 = pick_valid_solution(x_1_subset[0,:], x_2_subset[0,:], K, _R1, _R2, _T1, _T2)
+        except:
+            del matches[name_1 + ';' + name_2]
+            continue
+        R_1 = build_rotation_matrix(0, 0, 0)
+        T_1 = np.array([0, 0, 0])
+        orientation[name_1] = (T_1, R_1)
+        orientation[name_2] = (T_2, R_2)
+        for i in range(mp.shape[0]):
+            i_1 = mp[i, 0]
+            i_2 = mp[i, 1]
+            try:
+                X = triangulate_point(x_1[i_1,:], x_2[i_2,:], K, R_2, T_2, R_1, T_1)
+            except:
+                continue
+            if gid_1[i_1] != gid_2[i_2]:
+                raise ValueError("TODO: fix id mapping")
+            gid = gid_1[i_1]
+            points[gid, :3] = X
+            is_point[gid] = True
+        processed.append(name_1)
+        processed.append(name_2)
+        break
 
     while True:
         # TODO: select next image
         name = ""
+        max_subset_count = 0
         for n in image_names:
             if n in processed:
                 continue
-            name = n
+            subset_count = 0
+            x, des, gid = keypoints[n]
+            for i in range(x.shape[0]):
+                if gid[i] == -1:
+                    continue
+                if not is_point[gid[i]]:
+                    continue
+                subset_count += 1
+            if subset_count > max_subset_count:
+                max_subset_count = subset_count
+                name = n
         if name == "":
             break
         
@@ -170,6 +191,9 @@ def compute_sfm(image_names: list[str], calib_names: list[str]) -> dict[str, tup
             subset_count += 1
             if subset_count == 30:
                 break
+        if subset_count < 10:
+            processed.append(name)
+            continue
         _, R, T = dlt(x_subset[:subset_count,:], X_subset[:subset_count, :])
         orientation[name] = (T, R)
 
@@ -198,7 +222,10 @@ def compute_sfm(image_names: list[str], calib_names: list[str]) -> dict[str, tup
                     raise ValueError("TODO: fix id mapping")
                 if is_point[gid_1[i_1]]:
                     continue
-                X = triangulate_point(x_1[i_1,:], x_2[i_2,:], K, R_2, T_2, R_1, T_1)
+                try:
+                    X = triangulate_point(x_1[i_1,:], x_2[i_2,:], K, R_2, T_2, R_1, T_1)
+                except:
+                    continue
                 gid = gid_1[i_1]
                 points[gid, :3] = X
                 is_point[gid] = True

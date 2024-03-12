@@ -32,7 +32,7 @@ def dlt(x: np.ndarray, X: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarra
     h = p[:,3]
 
     X0: np.ndarray = -inv(H) @ h
-    X0 = X0.reshape((3,1))
+    X0 = X0.reshape((3,))
 
     Q, R = qr(inv(H))
     K = inv(R)

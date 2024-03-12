@@ -28,6 +28,8 @@ if __name__ == "__main__":
         help="specify output directory",
     )
     args = parser.parse_args()
+    if args.out is None:
+        args.out = "./out"
 
     # load images
     def load_images(path):

@@ -10,7 +10,7 @@ from .util import build_rotation_matrix
 from .triangulate import triangulate_point
 from .dlt import dlt
 
-def compute_sfm(image_names: list[str], calib_names: list[str]) -> dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]:
+def compute_sfm(image_names: list[str], calib_names: list[str]) -> tuple[np.ndarray, dict, dict[str, tuple[np.ndarray, np.ndarray]], np.ndarray]:
     IMG_SIZE = (600, 800)
     CHECKERBOARD = (6,9)
     KP_COUNT = 5000

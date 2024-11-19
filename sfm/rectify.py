@@ -3,6 +3,20 @@ from scipy.optimize import minimize
 import cv2
 
 def stereo_rectify(K1: np.ndarray, K2: np.ndarray, R12: np.ndarray, T12: np.ndarray, img_size: tuple[float, float]):
+    """Computes the stereo rectification of two images.
+
+    Args:
+        K1: [3 x 3] Calibration of the first image
+        K2: [3 x 3] Calibration of the second image
+        R12: [3 x 3] Rotation from the first to the second camera coordinate system
+        T12: [3 x 1] Translation of the second camera in the first camera coordinate system
+        img_size: image size as tuple (H, W)
+
+    Returns:
+        Tuple of R1 [3 x 3], R2 [3 x 3], P1 [3 x 3], P2 [3 x 3] and Q [4 x 4].
+        To create the homography matrices use H = P @ R @ inv(K)
+        Q is a matrix to project disparities from the rectified first image back into 3D (coordinate system of the rectified first camera).
+    """
     # compute rotations
     v1 = np.array([0, 0, 1])
     v2 = R12.T @ v1
